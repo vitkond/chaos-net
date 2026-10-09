@@ -2,5 +2,6 @@ run:
     - cargo build
     - sudo RUST_LOG=info ./target/debug/chaos-net \
         --container chaos-test \
-        --rule 10.88.0.1:8080=5000 \
-        --rule 10.88.0.1:8081=2000
+        --iface eth0 \
+        --rule "Outbound 10.88.0.1:8080=2000" \
+        --rule "Inbound 10.88.0.1:8080=3000"

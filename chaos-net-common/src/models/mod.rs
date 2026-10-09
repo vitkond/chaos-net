@@ -19,6 +19,16 @@ impl Debug for RuleType {
     }
 }
 
+impl Into<&'static str> for RuleType {
+    fn into(self) -> &'static str {
+        match self {
+            RuleType::Inbound => "Inbound",
+            RuleType::Outbound => "Outbound",
+            RuleType::Unknown => "Unknown",
+        }
+    }
+}
+
 impl From<&str> for RuleType {
     fn from(s: &str) -> Self {
         match s {
@@ -33,11 +43,10 @@ impl From<&str> for RuleType {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct RuleKey {
-    pub rule_type: RuleType,
     pub ipv4: u32,
     pub port: u16,
     pub protocol: u8,
-    pub _pad: u8,
+    pub rule_type: RuleType,
 }
 
 #[repr(C)]
@@ -55,11 +64,10 @@ unsafe impl aya::Pod for ChaosRule {}
 impl RuleKey {
     pub fn new(rule_type: RuleType, ipv4: u32, port: u16, protocol: u8) -> Self {
         Self {
-            rule_type,
             ipv4,
             port,
             protocol,
-            _pad: 0,
+            rule_type,
         }
     }
 }

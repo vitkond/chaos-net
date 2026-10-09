@@ -1,6 +1,7 @@
 use aya_log_ebpf::info;
 use aya_ebpf::helpers::bpf_ktime_get_ns;
 use aya_ebpf::programs::TcContext;
+use chaos_net_common::models::RuleType;
 
 pub fn unix_datetime(seconds: u64) -> (u64, u64, u64, u64, u64, u64) {
     let days = seconds / 86_400;
@@ -28,7 +29,12 @@ pub fn unix_datetime(seconds: u64) -> (u64, u64, u64, u64, u64, u64) {
     (year, month, day, hour, minute, second)
 }
 
-pub fn get_target(ctx: &TcContext, delay_ns: u64, clock_offset_ns: u64) -> u64 {
+pub fn get_target(
+    ctx: &TcContext, 
+    delay_ns: u64, 
+    clock_offset_ns: u64, 
+    rule_type: RuleType
+) -> u64 {
     let now = unsafe { bpf_ktime_get_ns() };
     let target = now + delay_ns;
     let target_unix_ns = target + clock_offset_ns;
@@ -37,7 +43,8 @@ pub fn get_target(ctx: &TcContext, delay_ns: u64, clock_offset_ns: u64) -> u64 {
     let (year, month, day, hour, minute, second) = unix_datetime(target_unix_seconds);
     info!(
         &ctx,
-        "delay packet: target_utc={}-{}-{}T{}:{}:{}.{}Z delay_ms={}",
+        "delay rule={} packet: target_utc={}-{}-{}T{}:{}:{}.{}Z delay_ms={}",
+        <RuleType as Into<&'static str>>::into(rule_type),
         year,
         month,
         day,

@@ -67,7 +67,7 @@ impl Processor for InboundProcessor {
 
         let delay_ns = chaos_rule.delay_ns;
     
-        let target = utils::get_target(&ctx, delay_ns, clock_offset_ns);
+        let target = utils::get_target(&ctx, delay_ns, clock_offset_ns, RuleType::Inbound);
         
         unsafe { bpf_skb_set_tstamp(ctx.skb.skb, target, 1); }
         Ok(TC_ACT_PIPE)
