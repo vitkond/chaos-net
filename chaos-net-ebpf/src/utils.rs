@@ -1,7 +1,9 @@
-use aya_log_ebpf::info;
+use aya_ebpf::helpers::generated::bpf_get_prandom_u32;
+use aya_log_ebpf::debug;
 use aya_ebpf::helpers::bpf_ktime_get_ns;
 use aya_ebpf::programs::TcContext;
-use chaos_net_common::models::RuleType;
+use aya_ebpf::maps::PerCpuHashMap;
+use chaos_net_common::models::{RuleType, RuleKey, RuleStats};
 
 pub fn unix_datetime(seconds: u64) -> (u64, u64, u64, u64, u64, u64) {
     let days = seconds / 86_400;
@@ -41,7 +43,7 @@ pub fn get_target(
     let target_unix_seconds = target_unix_ns / 1_000_000_000;
     let millisecond = (target_unix_ns % 1_000_000_000) / 1_000_000;
     let (year, month, day, hour, minute, second) = unix_datetime(target_unix_seconds);
-    info!(
+    debug!(
         &ctx,
         "delay rule={} packet: target_utc={}-{}-{}T{}:{}:{}.{}Z delay_ms={}",
         <RuleType as Into<&'static str>>::into(rule_type),
@@ -55,4 +57,26 @@ pub fn get_target(
         delay_ns / 1_000_000
     );
     target
+}
+
+pub fn should_drop(loss_percent: u32) -> bool {
+    if loss_percent == 0 {
+        return false;
+    }
+
+    let random = unsafe { bpf_get_prandom_u32() } % 100;
+
+    random < loss_percent
+}
+
+pub fn update_stats(key: &RuleKey, dropped: bool, stats: &PerCpuHashMap<RuleKey, RuleStats>) {
+    if let Some(ptr) = stats.get_ptr_mut(key) {
+        unsafe {
+            (*ptr).total += 1;
+
+            if dropped {
+                (*ptr).dropped += 1;
+            }
+        }
+    }
 }

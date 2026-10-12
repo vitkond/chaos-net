@@ -2,14 +2,15 @@ mod helpers;
 
 use std::fs::File;
 
-use aya::{maps::{Array, HashMap}, programs::{SchedClassifier, TcAttachType, tc}};
-use chaos_net_common::models::{ChaosRule, RuleKey};
+use aya::{maps::{Array, HashMap, MapData, PerCpuHashMap, PerCpuValues}, programs::{SchedClassifier, TcAttachType, tc}};
+use chaos_net_common::models::{ChaosRule, RuleKey, RuleStats};
 use helpers::{parse_rule, ensure_fq, enter_netns, container_pid, clock_ns};
 use clap::Parser;
 use log::info;
 #[rustfmt::skip]
 use log::{debug, warn};
 use tokio::signal;
+use helpers::log_drops;
 
 use crate::helpers::{input_iface_by_peer_index, peer_ifindex, switch_netns};
 
@@ -116,6 +117,13 @@ async fn main() -> anyhow::Result<()> {
             });
         }
     }
+
+    let nr_cpus = std::thread::available_parallelism()?.get();
+
+    let mut stats_map: PerCpuHashMap<MapData, RuleKey, RuleStats> =
+        PerCpuHashMap::<_, RuleKey, RuleStats>::try_from(
+            ebpf.take_map("STATS").unwrap()
+        )?;
     
 
     let realtime_ns = clock_ns(libc::CLOCK_REALTIME)?;
@@ -132,7 +140,14 @@ async fn main() -> anyhow::Result<()> {
     for rule in &opt.rules {
         let (rule_key, chaos_rule) = parse_rule(rule)?;
         chaos_rule_map.insert(rule_key, chaos_rule, 0)?;
+        
+        let zero_stats = PerCpuValues::try_from(
+            vec![RuleStats::default(); nr_cpus]
+        )?;
+        stats_map.insert(rule_key, zero_stats, 0)?;
     }
+
+    tokio::spawn(log_drops::log_drops(stats_map));
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");
