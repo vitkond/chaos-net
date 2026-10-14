@@ -31,19 +31,36 @@ pub fn unix_datetime(seconds: u64) -> (u64, u64, u64, u64, u64, u64) {
     (year, month, day, hour, minute, second)
 }
 
+fn apply_jitter(delay_ns: u64, jitter_ns: u64) -> u64 {
+    if jitter_ns == 0 {
+        return delay_ns;
+    }
+
+    let rnd = unsafe { bpf_get_prandom_u32() } as u64;
+
+    let range = jitter_ns * 2 + 1;
+    let offset = rnd % range;
+
+    let min_delay = delay_ns.saturating_sub(jitter_ns);
+
+    min_delay + offset
+}
+
 pub fn get_target(
     ctx: &TcContext, 
     delay_ns: u64, 
+    jitter_ns: u64,
     clock_offset_ns: u64, 
     rule_type: RuleType
 ) -> u64 {
     let now = unsafe { bpf_ktime_get_ns() };
-    let target = now + delay_ns;
+    let actual_delay_ns = apply_jitter(delay_ns, jitter_ns);
+    let target = now + actual_delay_ns;
     let target_unix_ns = target + clock_offset_ns;
     let target_unix_seconds = target_unix_ns / 1_000_000_000;
     let millisecond = (target_unix_ns % 1_000_000_000) / 1_000_000;
     let (year, month, day, hour, minute, second) = unix_datetime(target_unix_seconds);
-    debug!(
+    aya_log_ebpf::info!(
         &ctx,
         "delay rule={} packet: target_utc={}-{}-{}T{}:{}:{}.{}Z delay_ms={}",
         <RuleType as Into<&'static str>>::into(rule_type),
@@ -54,7 +71,7 @@ pub fn get_target(
         minute,
         second,
         millisecond,
-        delay_ns / 1_000_000
+        actual_delay_ns / 1_000_000
     );
     target
 }

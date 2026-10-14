@@ -70,8 +70,9 @@ impl Processor for OutboundProcessor {
             utils::update_stats(&rule_key, false, stats);
         }
         let delay_ns = chaos_rule.delay_ns;
+        let jitter_ns = chaos_rule.jitter_ns;
         if delay_ns > 0 {
-            let target = utils::get_target(&ctx, delay_ns, clock_offset_ns, RuleType::Outbound);
+            let target = utils::get_target(&ctx, delay_ns, jitter_ns, clock_offset_ns, RuleType::Outbound);
             unsafe { bpf_skb_set_tstamp(ctx.skb.skb, target, 1); }
         }
         Ok(TC_ACT_PIPE)

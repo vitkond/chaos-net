@@ -26,6 +26,8 @@ pub fn parse_rule(rule: &str) -> anyhow::Result<(RuleKey, ChaosRule)> {
     
     let mut delay = 0;
     let mut loss = 0;
+    let mut jitter = 0;
+    
     for r in rules {
         if let Some((key, value)) = r.split_once('=') {
             match key {
@@ -34,6 +36,9 @@ pub fn parse_rule(rule: &str) -> anyhow::Result<(RuleKey, ChaosRule)> {
                 },
                 "loss" => {
                     loss = value.parse::<u32>()?;
+                },
+                "jitter" => {
+                    jitter = value.parse::<u64>()?;
                 },
                 _ => anyhow::bail!("unknown rule key: {}", key),
             }
@@ -51,6 +56,7 @@ pub fn parse_rule(rule: &str) -> anyhow::Result<(RuleKey, ChaosRule)> {
 
     let rule = ChaosRuleBuilder::default()
         .delay_ns(delay * 1_000_000)
+        .jitter_ns(jitter * 1_000_000)
         .loss_percent(loss)
         .build()
         .map_err(|e| 

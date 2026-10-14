@@ -75,8 +75,9 @@ impl Processor for InboundProcessor {
         }
 
         let delay_ns = chaos_rule.delay_ns;
+        let jitter_ns = chaos_rule.jitter_ns;
         if delay_ns > 0 {
-            let target = utils::get_target(&ctx, delay_ns, clock_offset_ns, RuleType::Inbound);
+            let target = utils::get_target(&ctx, delay_ns, jitter_ns, clock_offset_ns, RuleType::Inbound);
             unsafe { bpf_skb_set_tstamp(ctx.skb.skb, target, 1); }
         }
     

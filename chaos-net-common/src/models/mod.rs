@@ -56,6 +56,8 @@ pub struct ChaosRule {
     #[builder(default = 0)]
     pub delay_ns: u64,
     #[builder(default = 0)]
+    pub jitter_ns: u64,
+    #[builder(default = 0)]
     pub loss_percent: u32,
     #[builder(default = 0)]
     pub _pad: u32,
