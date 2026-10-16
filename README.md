@@ -9,6 +9,7 @@ The current implementation can:
 - delay inbound and outbound packets;
 - add random jitter to that delay;
 - randomly drop a percentage of packets;
+- independently limit inbound and outbound bandwidth with tc TBF;
 - report per-rule packet and drop counts every three seconds.
 
 Rules are held in eBPF maps and disappear when the process exits. The program
@@ -75,13 +76,31 @@ privileged kernel operations:
 sudo env RUST_LOG=info ./target/debug/chaos-net \
   --container chaos-test \
   --iface eth0 \
-  --rule "Outbound 10.88.0.1:8080 delay=100 jitter=30 loss=50" \
-  --rule "Inbound 10.88.0.1:8080 delay=100 jitter=30 loss=50"
+  --outbound-rate 10mbit \
+  --inbound-rate 5mbit \
+  --rule "Outbound 10.88.0.1:8080 delay=100 jitter=30 loss=10" \
+  --rule "Inbound 10.88.0.1:8080 delay=100 jitter=30 loss=10"
 ```
 
 `just run` builds and runs that example. Replace the container, interface,
 destination/source, and rule values for your environment. Press Ctrl-C to detach
 the eBPF links and stop reporting.
+
+### Bandwidth limits
+
+Both rate options are optional and use rate strings accepted by `tc`, such as
+`10mbit`:
+
+| Option | Direction and interface |
+| --- | --- |
+| `--outbound-rate` | Traffic leaving the container through `--iface`. |
+| `--inbound-rate` | Traffic entering the container through the host-side veth peer. |
+
+For each direction with a rate set, the program installs a root TBF qdisc with
+that rate, a fixed `burst` of `32kbit`, and `latency` of `400ms`, then attaches an
+FQ qdisc beneath it. Without a rate, it installs a root FQ qdisc for that
+direction. Rate limits apply to all traffic on the corresponding interface,
+independently of the IPv4/TCP rules below.
 
 ### Rule format
 
@@ -140,9 +159,10 @@ rootless Podman connection, is needed for that case.
 
 ### Networking side effects and cleanup
 
-The program runs `tc qdisc replace ... root fq` on the container interface and its
-host peer, then adds `clsact`. The attached classifier links are dropped when the
-program exits, but the qdisc configuration can remain. Inspect it with:
+The program replaces the root qdisc on the container interface and its host peer
+with FQ, or TBF with an FQ child when a rate is supplied, then adds `clsact`.
+The attached classifier links are dropped when the program exits, but the qdisc
+configuration, including bandwidth limits, can remain. Inspect the host peer with:
 
 ```shell
 sudo tc qdisc show dev <interface>
@@ -154,6 +174,10 @@ Only remove a qdisc after confirming that nothing else relies on it:
 sudo tc qdisc del dev <interface> clsact
 sudo tc qdisc del dev <interface> root
 ```
+
+To inspect or remove qdiscs on the container interface, run the same commands in
+the container's network namespace, for example with
+`sudo nsenter -t <container-pid> -n tc qdisc show dev eth0`.
 
 ## Cross-compile on macOS
 
