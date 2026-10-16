@@ -20,9 +20,9 @@ impl Debug for RuleType {
     }
 }
 
-impl Into<&'static str> for RuleType {
-    fn into(self) -> &'static str {
-        match self {
+impl From<RuleType> for &'static str {
+    fn from(val: RuleType) -> Self {
+        match val {
             RuleType::Inbound => "Inbound",
             RuleType::Outbound => "Outbound",
             RuleType::Unknown => "Unknown",
@@ -85,8 +85,8 @@ impl Debug for RuleKey {
         write!(f, 
             "RuleKey {{ ipv4: {}, port: {}, protocol: {}, rule_type: {:?} }}", 
             {
-                let ip = Ipv4Addr::from(self.ipv4.to_be_bytes());
-                ip
+                
+                Ipv4Addr::from(self.ipv4.to_be_bytes())
             },
             self.port, self.protocol, self.rule_type
         )

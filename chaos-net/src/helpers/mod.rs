@@ -4,7 +4,8 @@ use std::{
     fs::File, os::fd::AsRawFd,
 };
 
-static RULES_FORMAT: &str = "RULE_TYPE IP:PORT DELAY_MS LOSS_PERCENT";
+static RULES_FORMAT: &str =
+    "RULE_TYPE IP:PORT delay=MS loss=PERCENT jitter=MS";
 
 pub fn parse_rule(rule: &str) -> anyhow::Result<(RuleKey, ChaosRule)> {
     let (rule_type, rule) = rule.split_once(' ')
@@ -65,7 +66,7 @@ pub fn parse_rule(rule: &str) -> anyhow::Result<(RuleKey, ChaosRule)> {
     Ok((key, rule))
 }
 
-pub fn ensure_fq(iface: &str) -> anyhow::Result<()> {
+fn ensure_fq(iface: &str) -> anyhow::Result<()> {
     use std::process::Command;
 
     let status = Command::new("tc")
@@ -74,6 +75,42 @@ pub fn ensure_fq(iface: &str) -> anyhow::Result<()> {
 
     if !status.success() {
         anyhow::bail!("failed to install fq on {iface}");
+    }
+
+    Ok(())
+}
+
+fn ensure_tbf(iface: &str, rate: &str, burst: &str, latency: &str) -> anyhow::Result<()> {
+    use std::process::Command;
+
+    let status = Command::new("tc")
+        .args(["qdisc", "replace", "dev", iface, "root", "handle", "1:", "tbf", "rate", rate, "burst", burst, "latency", latency])
+        .status()?;
+
+    if !status.success() {
+        anyhow::bail!("failed to install tbf on {iface} with rate {rate}, burst {burst}, latency {latency}");
+    }
+
+    let status = Command::new("tc")
+        .args(["qdisc", "replace", "dev", iface, "parent", "1:1", "handle", "10:", "fq"])
+        .status()?;
+
+    if !status.success() {
+        anyhow::bail!("failed to install fq under tbf on {iface}");
+    }
+
+    Ok(())
+}
+
+pub fn configure_qdisc(iface: &str, rate: Option<&str>) -> anyhow::Result<()> {
+    match rate {
+        Some(rate) => {
+            ensure_tbf(iface, rate, "32kbit", "400ms")?;
+        }
+
+        None => {
+            ensure_fq(iface)?;
+        }
     }
 
     Ok(())
@@ -162,8 +199,7 @@ pub fn input_iface_by_peer_index(peer_index: u32) -> anyhow::Result<String> {
     .ok_or_else(|| anyhow::anyhow!("no input interface found"))?;
 
     let input: &str = line
-        .split('@')
-        .nth(0)
+        .split('@').next()
         .and_then(|s| s.strip_prefix(&peer_index_str))
         .ok_or_else(|| anyhow::anyhow!("input ifindex not found"))?;
 

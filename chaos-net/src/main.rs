@@ -4,11 +4,11 @@ use std::fs::File;
 
 use aya::{maps::{Array, HashMap, MapData, PerCpuHashMap, PerCpuValues}, programs::{SchedClassifier, TcAttachType, tc}};
 use chaos_net_common::models::{ChaosRule, RuleKey, RuleStats};
-use helpers::{parse_rule, ensure_fq, enter_netns, container_pid, clock_ns};
+use helpers::{parse_rule, enter_netns, container_pid, clock_ns};
 use clap::Parser;
 use log::info;
 #[rustfmt::skip]
-use log::{debug, warn};
+use log::warn;
 use tokio::signal;
 use helpers::log_drops;
 
@@ -24,6 +24,12 @@ struct Opt {
 
     #[arg(long = "rule")]
     rules: Vec<String>,
+
+    #[arg(long)]
+    outbound_rate: Option<String>,
+
+    #[arg(long)]
+    inbound_rate: Option<String>,
 }
 
 #[tokio::main]
@@ -54,8 +60,19 @@ async fn main() -> anyhow::Result<()> {
     let host_ifindex = peer_ifindex(&opt.iface)?;
     info!("host peer ifindex: {host_ifindex}");
 
-    ensure_fq(&opt.iface)?;
-    info!("fq installed on outbound container interface {}", opt.iface);
+    helpers::configure_qdisc(&opt.iface, opt.outbound_rate.as_deref())?;
+    info!("qdisc configured on outbound container interface {}", opt.iface);
+
+    // Bump the memlock rlimit. This is needed for older kernels that don't use the
+    // new memcg based accounting, see https://lwn.net/Articles/837122/
+    let rlim = libc::rlimit {
+        rlim_cur: libc::RLIM_INFINITY,
+        rlim_max: libc::RLIM_INFINITY,
+    };
+    let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
+    if ret != 0 {
+        warn!("remove limit on locked memory failed, ret is: {ret}");
+    }
 
     // error adding clsact to the interface if it is already added is harmless
     // the full cleanup can be done with 'sudo tc qdisc del dev eth0 clsact'.
@@ -74,8 +91,8 @@ async fn main() -> anyhow::Result<()> {
     let inbound_iface = input_iface_by_peer_index(host_ifindex)?;
     info!("inbound interface: {inbound_iface}");
 
-    ensure_fq(&inbound_iface)?;
-    info!("fq installed on inbound host interface {}", inbound_iface);
+    helpers::configure_qdisc(&inbound_iface, opt.inbound_rate.as_deref())?;
+    info!("qdisc configured on inbound host interface {}", inbound_iface);
 
     let _ = tc::qdisc_add_clsact(&inbound_iface);
     {
@@ -85,20 +102,7 @@ async fn main() -> anyhow::Result<()> {
 
     let program_inbound: &mut SchedClassifier = ebpf.program_mut("chaos_inbound").unwrap().try_into()?;
     program_inbound.attach(&inbound_iface, TcAttachType::Egress)?;
-
     /* End of inbound settings */
-
-
-    // Bump the memlock rlimit. This is needed for older kernels that don't use the
-    // new memcg based accounting, see https://lwn.net/Articles/837122/
-    let rlim = libc::rlimit {
-        rlim_cur: libc::RLIM_INFINITY,
-        rlim_max: libc::RLIM_INFINITY,
-    };
-    let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
-    if ret != 0 {
-        debug!("remove limit on locked memory failed, ret is: {ret}");
-    }
 
     match aya_log::EbpfLogger::init(&mut ebpf) {
         Err(e) => {
@@ -118,14 +122,13 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let nr_cpus = std::thread::available_parallelism()?.get();
+    let nr_cpus = aya::util::nr_cpus().map_err(|(_, e)| e)?;
 
     let mut stats_map: PerCpuHashMap<MapData, RuleKey, RuleStats> =
         PerCpuHashMap::<_, RuleKey, RuleStats>::try_from(
             ebpf.take_map("STATS").unwrap()
         )?;
     
-
     let realtime_ns = clock_ns(libc::CLOCK_REALTIME)?;
     let monotonic_ns = clock_ns(libc::CLOCK_MONOTONIC)?;
     let clock_offset_ns = realtime_ns

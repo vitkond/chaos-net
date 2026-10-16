@@ -1,5 +1,4 @@
 use aya_ebpf::helpers::generated::bpf_get_prandom_u32;
-use aya_log_ebpf::debug;
 use aya_ebpf::helpers::bpf_ktime_get_ns;
 use aya_ebpf::programs::TcContext;
 use aya_ebpf::maps::PerCpuHashMap;

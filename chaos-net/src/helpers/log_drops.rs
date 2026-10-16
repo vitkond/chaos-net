@@ -13,7 +13,7 @@ pub async fn log_drops(
             interval.tick().await;
 
             log::info!("===== Logging drops start... ======");
-            for (_, rk_vals) in stats.iter().enumerate() {
+            for rk_vals in stats.iter() {
                 let (rule_key, values) = match rk_vals {
                     Ok((key, vals)) => (key, vals),
                     Err(e) => {
