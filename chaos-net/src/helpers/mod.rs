@@ -232,3 +232,15 @@ pub fn clock_ns(clock_id: libc::clockid_t) -> anyhow::Result<u64> {
 
     Ok(timestamp.tv_sec as u64 * 1_000_000_000 + timestamp.tv_nsec as u64)
 }
+
+pub fn remove_root_qdisc(iface: &str) -> anyhow::Result<()> {
+    let status = std::process::Command::new("tc")
+        .args(["qdisc", "del", "dev", iface, "root"])
+        .status()?;
+
+    if !status.success() {
+        anyhow::bail!("failed to remove root qdisc on {iface}");
+    }
+
+    Ok(())
+}

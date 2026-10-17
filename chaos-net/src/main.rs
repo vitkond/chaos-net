@@ -60,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let host_ifindex = peer_ifindex(&opt.iface)?;
     info!("host peer ifindex: {host_ifindex}");
 
+
     helpers::configure_qdisc(&opt.iface, opt.outbound_rate.as_deref())?;
     info!("qdisc configured on outbound container interface {}", opt.iface);
 
@@ -82,7 +83,8 @@ async fn main() -> anyhow::Result<()> {
         program.load()?;
     }
     let program_outbound: &mut SchedClassifier = ebpf.program_mut("chaos_outbound").unwrap().try_into()?;
-    program_outbound.attach(&opt.iface, TcAttachType::Egress)?;
+    let outbound_link_id = program_outbound.attach(
+        &opt.iface, TcAttachType::Egress)?;
     /* End of outbound settings */
 
 
@@ -101,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let program_inbound: &mut SchedClassifier = ebpf.program_mut("chaos_inbound").unwrap().try_into()?;
-    program_inbound.attach(&inbound_iface, TcAttachType::Egress)?;
+    let inbound_link_id = program_inbound.attach(&inbound_iface, TcAttachType::Egress)?;
     /* End of inbound settings */
 
     match aya_log::EbpfLogger::init(&mut ebpf) {
@@ -156,6 +158,31 @@ async fn main() -> anyhow::Result<()> {
     println!("Waiting for Ctrl-C...");
     ctrl_c.await?;
     println!("\nExiting...");
+
+    // 1. Host namespace — inbound
+    {
+        let program: &mut SchedClassifier =
+            ebpf.program_mut("chaos_inbound").unwrap().try_into()?;
+
+        program.detach(inbound_link_id)?;
+    }
+
+    helpers::remove_root_qdisc(&inbound_iface)?;
+
+    // 2. Container namespace — outbound
+    enter_netns(pid)?;
+
+    {
+        let program: &mut SchedClassifier =
+            ebpf.program_mut("chaos_outbound").unwrap().try_into()?;
+
+        program.detach(outbound_link_id)?;
+    }
+
+    helpers::remove_root_qdisc(&opt.iface)?;
+
+    // 3. Back to host namespace
+    switch_netns(&host_netns)?;
 
     Ok(())
 }
